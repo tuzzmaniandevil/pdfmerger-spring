@@ -156,6 +156,7 @@
                         }
                         saveFile(resp, filename);
                         disableForm(false);
+                        swal("Success!", "Your files have been converted", "success");
                     },
                     error: function () {
                         swal("Oh No!", "Something went wrong!", "error");
