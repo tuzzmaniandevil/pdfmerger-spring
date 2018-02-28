@@ -96,6 +96,7 @@
             if (getFileCount() <= 0) {
                 return false;
             } else {
+                disableForm(true);
                 var fileOrder = [];
 
                 filesBody.find('tr').each(function (i, item) {
@@ -154,6 +155,11 @@
                             filename = 'output.pdf';
                         }
                         saveFile(resp, filename);
+                        disableForm(false);
+                    },
+                    error: function () {
+                        swal("Oh No!", "Something went wrong!", "error");
+                        disableForm(false);
                     }
                 };
 
@@ -162,6 +168,13 @@
 
             return false;
         });
+    }
+
+    function disableForm(disabled) {
+        var form = $('#pdfForm');
+
+        form.find("input").attr("disabled", disabled);
+        form.find("button").attr("disabled", disabled);
     }
 
     function saveFile(blob, filename) {

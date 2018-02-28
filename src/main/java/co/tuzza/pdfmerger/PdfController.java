@@ -22,6 +22,7 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.PDPageContentStream.AppendMode;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -61,11 +62,11 @@ public class PdfController {
             if (isPdf(file)) {
                 merger.addSource(file.getInputStream());
             } else if (isJpg(file)) {
-                byte[] bytes = convertJpg(file);
-                byte[] bs = convertImage(bytes, file.getOriginalFilename());
+                BufferedImage image = convertJpg(file);
+                byte[] bs = convertImage(image);
                 merger.addSource(new ByteArrayInputStream(bs));
-            } else {
-                byte[] bytes = convertImage(file.getBytes(), file.getOriginalFilename());
+            } else if (isImage(file)) {
+                byte[] bytes = convertImage(file);
                 merger.addSource(new ByteArrayInputStream(bytes));
             }
         }
@@ -100,10 +101,21 @@ public class PdfController {
                 || StringUtils.containsIgnoreCase(contentType, "image/jpg");
     }
 
-    private byte[] convertImage(byte[] bytes, String fileName) throws IOException {
+    private boolean isImage(MultipartFile file) {
+        String contentType = file.getContentType();
+        return StringUtils.startsWithIgnoreCase(contentType, "image/") && !StringUtils.startsWithIgnoreCase(contentType, "image/svg");
+    }
+
+    private byte[] convertImage(MultipartFile file) throws IOException {
+        BufferedImage image = ImageIO.read(file.getInputStream());
+        
+        return convertImage(image);
+    }
+
+    private byte[] convertImage(BufferedImage bufferedImage) throws IOException {
         PDDocument pdd = new PDDocument();
 
-        PDImageXObject pdImage = PDImageXObject.createFromByteArray(pdd, bytes, fileName);
+        PDImageXObject pdImage = LosslessFactory.createFromImage(pdd, bufferedImage);
 
         PDRectangle size = new PDRectangle(pdImage.getWidth(), pdImage.getHeight());
 
@@ -121,7 +133,7 @@ public class PdfController {
         return out.toByteArray();
     }
 
-    private byte[] convertJpg(MultipartFile file) throws IOException, ImageProcessingException {
+    private BufferedImage convertJpg(MultipartFile file) throws IOException, ImageProcessingException {
         byte[] bytes = file.getBytes();
 
         ByteArrayInputStream in = new ByteArrayInputStream(bytes);
@@ -130,9 +142,6 @@ public class PdfController {
         in.reset();
         BufferedImage image = ImageIO.read(in);
 
-        int width = image.getWidth();
-        int height = image.getHeight();
-
         if (metadata.containsDirectoryOfType(ExifIFD0Directory.class)) {
             Collection<ExifIFD0Directory> dirs = metadata.getDirectoriesOfType(ExifIFD0Directory.class);
             for (ExifIFD0Directory dir : dirs) {
@@ -140,27 +149,24 @@ public class PdfController {
                     Integer orientation = dir.getInteger(ExifIFD0Directory.TAG_ORIENTATION);
 
                     if (orientation != null) {
-                        BufferedImage rot = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-                        AffineTransform transform = getAffineTransform(orientation, width, height);
-
-                        Graphics2D g = rot.createGraphics();
-                        g.drawImage(image, transform, null);
-                        g.dispose();
-
-                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        ImageIO.write(rot, "jpg", baos);
-
-                        return baos.toByteArray();
+                        return getRotatedImage(orientation, image);
                     }
                 }
             }
         }
 
-        return bytes;
+        return image;
     }
 
-    private AffineTransform getRotateImage(int orientation, int width, int height) {
+    private BufferedImage getRotatedImage(int orientation, BufferedImage image) throws IOException {
         AffineTransform t = new AffineTransform();
+
+        int width = image.getWidth();
+        int height = image.getHeight();
+
+        int newWidth = width;
+        int newHeight = height;
+
         switch (orientation) {
             case 1:
                 break;
@@ -183,6 +189,8 @@ public class PdfController {
             case 6: // -PI/2 and -width
                 t.translate(height, 0);
                 t.rotate(Math.PI / 2);
+                newWidth = height;
+                newHeight = width;
                 break;
             case 7: // PI/2 and Flip
                 t.scale(-1.0, 1.0);
@@ -193,9 +201,17 @@ public class PdfController {
             case 8: // PI / 2
                 t.translate(0, width);
                 t.rotate(3 * Math.PI / 2);
+                newWidth = height;
+                newHeight = width;
                 break;
         }
 
-        return t;
+        BufferedImage rot = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
+
+        Graphics2D g = rot.createGraphics();
+        g.drawImage(image, t, null);
+        g.dispose();
+
+        return rot;
     }
 }
