@@ -10,115 +10,30 @@
 
     function resetForm() {
         $('#pdfForm').trigger('reset');
-        // Remove previous hidden fields
-        $('.fileOrder').remove();
-        $('#filesBody').empty();
-
-        updateSorting();
-    }
-
-    function initRemoveFile() {
-        $('body').on('click', '.btn-remote-file', function (e) {
-            e.preventDefault();
-
-            var btn = $(this);
-            var tr = btn.closest('tr');
-
-            if (confirm('Are you sure you want to remove this file?')) {
-                tr.remove();
-                updateSorting();
-            }
-        });
-    }
-
-    // Init Sortable for files
-    function initFilesTable() {
-        $('body').on('change', '#files', function (e) {
-            var inp = $(this);
-            var files = inp[0].files;
-
-            var filesBody = $('#filesBody');
-
-            // Generate new list
-            var newList = [];
-
-            for (var i = 0; i < files.length; i++) {
-                var file = files[i];
-
-                var a = $('<tr data-id="' + i + '" data-filename="' + file.name + '">' +
-                        '<td><i class="fa fa-bars"></i></td>' +
-                        '<td>' + file.name + '</td>' +
-                        '<td>' + file.type + '</td>' +
-                        '<td><button class="btn btn-danger btn-remote-file" type="button" title="Remove"><i class="fa fa-trash"></i></button></td>' +
-                        '</tr>');
-
-                var fileData = {
-                    order: i,
-                    file: file,
-                    fileName: file.name
-                };
-
-                a.data('fileData', fileData);
-
-                newList.push(a);
-            }
-
-            if (newList.length > 0) {
-                filesBody.append(newList);
-            }
-
-            updateSorting();
-            inp.val('');
-        });
-    }
-
-    // Init Sortable for files
-    function initSortable() {
-        var filesBody = $('#filesBody');
-
-        filesBody.disableSelection();
-        filesBody
-                .sortable({
-                    axis: 'y'
-                })
-                .on('sortstop', function (event, ui) {
-                    updateSorting();
-                });
     }
 
     function initForm() {
         var form = $('#pdfForm');
-        var filesBody = $('#filesBody');
 
         form.on('submit', function (e) {
             e.preventDefault();
+            var files = form.find('#file')[0].files;
 
-            if (getFileCount() <= 0) {
+            if (files.length <= 0) {
                 return false;
             } else {
                 disableForm(true);
-                var fileOrder = [];
 
-                filesBody.find('tr').each(function (i, item) {
-                    var f = $(item);
-                    var d = f.data('fileData');
-                    fileOrder.push(d);
-                });
+                var fileToUpload = files[0];
 
-                fileOrder.sort(dynamicSort('order'));
+                console.log(fileToUpload, fileToUpload, fileToUpload.name);
 
                 var formData = new FormData();
-
-                formData.append('outputName', $('#outputName').val());
-
-                for (var i = 0; i < fileOrder.length; i++) {
-                    var f = fileOrder[i];
-                    formData.append('files', f.file, f.fileName);
-                }
+                formData.append('file', fileToUpload, fileToUpload.name);
 
                 var ajaxOpts = {
                     type: 'POST',
-                    url: '/mergePdf',
+                    url: '/splitPdf',
                     data: formData,
                     dataType: 'binary',
                     processData: false,
@@ -152,11 +67,11 @@
                         }
 
                         if (filename === null || typeof filename === 'undefined' || filename.length < 1) {
-                            filename = 'output.pdf';
+                            filename = 'output.zip';
                         }
                         saveFile(resp, filename);
                         disableForm(false);
-                        swal("Success!", "Your files have been converted", "success");
+                        swal("Success!", "Your PDF has been split", "success");
                     },
                     error: function () {
                         swal("Oh No!", "Something went wrong!", "error");
@@ -196,50 +111,10 @@
         }
     }
 
-    function updateSorting() {
-        var filesTable = $('#filesTable');
-        var filesBody = $('#filesBody');
-
-        filesBody.find('tr').each(function (i, item) {
-            var f = $(item);
-            var d = f.data('fileData');
-            d.order = i;
-
-            console.log(i, d);
-        });
-
-        console.log('updateSorting', getFileCount());
-
-        if (getFileCount() > 0) {
-            filesTable.removeClass('hidden');
-        } else {
-            filesTable.addClass('hidden');
-        }
-    }
-
-    function getFileCount() {
-        return $('#filesBody').find('tr').length;
-    }
-
-    function dynamicSort(property) {
-        var sortOrder = 1;
-        if (property[0] === "-") {
-            sortOrder = -1;
-            property = property.substr(1);
-        }
-        return function (a, b) {
-            var result = (a[property] < b[property]) ? -1 : (a[property] > b[property]) ? 1 : 0;
-            return result * sortOrder;
-        };
-    }
-
     // Init Methods
     $(function () {
         initReset();
-        initSortable();
-        initFilesTable();
         initForm();
-        initRemoveFile();
     });
 })(jQuery);
 
