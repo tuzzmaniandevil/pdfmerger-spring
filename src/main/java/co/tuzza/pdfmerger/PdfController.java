@@ -51,8 +51,12 @@ public class PdfController {
     }
 
     @PostMapping("/splitPdf")
-    public ResponseEntity<byte[]> splitPdf(@RequestPart(name = "file", required = true) MultipartFile file) throws IOException {
-        ByteArrayOutputStream pdfOs = pdfMergingService.splitPdf(file);
+    public ResponseEntity<byte[]> splitPdf(
+            @RequestPart(name = "file", required = true) MultipartFile file,
+            @RequestParam(name = "startPage", required = false) Integer startPage,
+            @RequestParam(name = "endPage", required = false) Integer endPage
+    ) throws IOException {
+        ByteArrayOutputStream pdfOs = pdfMergingService.splitPdf(file, startPage, endPage);
         byte[] pdfBytes = pdfOs.toByteArray();
 
         return ResponseEntity

@@ -10,10 +10,19 @@
 
     function resetForm() {
         $('#pdfForm').trigger('reset');
+
+        $('#pdfForm').find('.startPage-wrapper').hide();
+        $('#pdfForm').find('.endPage-wrapper').hide();
     }
 
     function initForm() {
         var form = $('#pdfForm');
+
+        var startPageWrapper = form.find('.startPage-wrapper');
+        var endPageWrapper = form.find('.endPage-wrapper');
+
+        var startPageSelector = startPageWrapper.find('[name=startPage]');
+        var endPageSelector = endPageWrapper.find('[name=endPage]');
 
         form.on('submit', function (e) {
             e.preventDefault();
@@ -30,6 +39,12 @@
 
                 var formData = new FormData();
                 formData.append('file', fileToUpload, fileToUpload.name);
+                if (startPageSelector.is(':visible')) {
+                    formData.append('startPage', startPageSelector.val());
+                }
+                if (endPageSelector.is(':visible')) {
+                    formData.append('endPage', endPageSelector.val());
+                }
 
                 var ajaxOpts = {
                     type: 'POST',
@@ -111,10 +126,62 @@
         }
     }
 
+    function initPdfUploader() {
+        var form = $('#pdfForm');
+        var fileInput = form.find('#file');
+
+        var startPageWrapper = form.find('.startPage-wrapper');
+        var endPageWrapper = form.find('.endPage-wrapper');
+
+        var startPageSelector = startPageWrapper.find('[name=startPage]');
+        var endPageSelector = endPageWrapper.find('[name=endPage]');
+
+        fileInput.on('change', function () {
+            var file = this.files[0];
+
+            if (!file) {
+                startPageWrapper.hide();
+                endPageWrapper.hide();
+                return;
+            }
+
+            var fileReader = new FileReader();
+            fileReader.onload = function (e) {
+                pdfjsLib.getDocument({data: new Uint8Array(e.target.result)}).then(function (pdf) {
+                    var numPages = pdf.pdfInfo.numPages;
+
+                    startPageSelector.empty();
+                    endPageSelector.empty();
+
+                    if (numPages > 1) {
+                        for (var i = 1; i <= numPages; i++) {
+                            startPageSelector.append($('<option>', {
+                                value: i,
+                                text: 'Page ' + i
+                            }));
+
+                            endPageSelector.append($('<option>', {
+                                value: i,
+                                text: 'Page ' + i
+                            }));
+                        }
+
+                        startPageWrapper.show();
+
+                        endPageSelector.val(numPages);
+                        endPageWrapper.show();
+                    }
+                });
+            };
+            fileReader.readAsArrayBuffer(file);
+        });
+    }
+
     // Init Methods
     $(function () {
         initReset();
         initForm();
+        initPdfUploader();
     });
 })(jQuery);
 

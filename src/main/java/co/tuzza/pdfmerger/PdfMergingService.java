@@ -59,13 +59,21 @@ public class PdfMergingService {
         return baos;
     }
 
-    public ByteArrayOutputStream splitPdf(MultipartFile file) throws IOException {
+    public ByteArrayOutputStream splitPdf(MultipartFile file, Integer startPage, Integer endPage) throws IOException {
         if (isPdf(file)) {
             Splitter splitter = new Splitter();
 
             splitter.setMemoryUsageSetting(MemoryUsageSetting.setupTempFileOnly());
 
             PDDocument pdd = PDDocument.load(file.getInputStream());
+
+            if (startPage != null && startPage >= 1) {
+                splitter.setStartPage(startPage);
+            }
+
+            if (endPage != null && endPage >= 1) {
+                splitter.setEndPage(endPage);
+            }
 
             List<PDDocument> splitDocs = splitter.split(pdd);
 
