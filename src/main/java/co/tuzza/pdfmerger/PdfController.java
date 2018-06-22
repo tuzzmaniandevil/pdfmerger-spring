@@ -25,10 +25,10 @@ public class PdfController {
     @Autowired
     private PdfMergingService pdfMergingService;
 
-    @PostMapping("/mergePdf")
-    public ResponseEntity<byte[]> mergePdf(
-            @RequestParam(name = "outputName", required = false) String outputName,
-            @RequestPart(name = "files", required = true) MultipartFile[] files) throws IOException, ServletException, ImageProcessingException {
+    @PostMapping(path = "/mergePdf")
+    public ResponseEntity<byte[]> mergePdf(@RequestParam(name = "outputName", required = false) String outputName,
+            @RequestPart(name = "files", required = true) MultipartFile[] files, @RequestPart(required = false, name = "settings") PdfSettings settings)
+            throws IOException, ServletException, ImageProcessingException {
 
         if (StringUtils.isEmpty(outputName)) {
             outputName = "output.pdf";
@@ -40,31 +40,23 @@ public class PdfController {
             }
         }
 
-        ByteArrayOutputStream pdfos = pdfMergingService.mergeFilesToPdf(files);
+        ByteArrayOutputStream pdfos = pdfMergingService.mergeFilesToPdf(files, settings);
         byte[] pdfBytes = pdfos.toByteArray();
 
-        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,
-                "attachment; filename=\"" + outputName + "\"")
-                .contentType(MediaType.APPLICATION_PDF)
-                .contentLength(pdfBytes.length)
-                .body(pdfBytes);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + outputName + "\"")
+                .contentType(MediaType.APPLICATION_PDF).contentLength(pdfBytes.length).body(pdfBytes);
     }
 
     @PostMapping("/splitPdf")
-    public ResponseEntity<byte[]> splitPdf(
-            @RequestPart(name = "file", required = true) MultipartFile file,
+    public ResponseEntity<byte[]> splitPdf(@RequestPart(name = "file", required = true) MultipartFile file,
             @RequestParam(name = "startPage", required = false) Integer startPage,
-            @RequestParam(name = "endPage", required = false) Integer endPage
-    ) throws IOException {
+            @RequestParam(name = "endPage", required = false) Integer endPage) throws IOException {
         ByteArrayOutputStream pdfOs = pdfMergingService.splitPdf(file, startPage, endPage);
         byte[] pdfBytes = pdfOs.toByteArray();
 
-        return ResponseEntity
-                .ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"splitPdf.zip\"")
-                .contentType(MediaType.valueOf("application/zip"))
-                .contentLength(pdfBytes.length)
-                .body(pdfBytes);
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"splitPdf.zip\"")
+                .contentType(MediaType.valueOf("application/zip")).contentLength(pdfBytes.length).body(pdfBytes);
     }
 
 }

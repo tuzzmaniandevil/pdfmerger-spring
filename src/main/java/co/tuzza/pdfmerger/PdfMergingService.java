@@ -5,10 +5,14 @@ import com.drew.imaging.ImageProcessingException;
 import com.drew.metadata.Metadata;
 import com.drew.metadata.exif.ExifIFD0Directory;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.List;
 import java.util.zip.ZipEntry;
@@ -26,6 +30,10 @@ import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.rendering.ImageType;
+import org.apache.pdfbox.rendering.PDFRenderer;
+import org.apache.pdfbox.tools.imageio.ImageIOUtil;
+import org.apache.pdfbox.util.Matrix;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -36,14 +44,27 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 public class PdfMergingService {
 
-    public ByteArrayOutputStream mergeFilesToPdf(MultipartFile[] files) throws IOException, ImageProcessingException {
+    public ByteArrayOutputStream mergeFilesToPdf(MultipartFile[] files, PdfSettings settings) throws IOException, ImageProcessingException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         PDFMergerUtility merger = new PDFMergerUtility();
         merger.setDestinationStream(baos);
 
-        for (MultipartFile file : files) {
+        PdfAdjustBean[] fileSettings = settings != null ? settings.getFiles() : null;
+
+        for (int i = 0; i < files.length; i++) {
+            MultipartFile file = files[i];
+            PdfAdjustBean fileSetting = (fileSettings != null && fileSettings.length - 1 >= i) ? fileSettings[i] : null;
+
             if (isPdf(file)) {
-                merger.addSource(file.getInputStream());
+                if (fileSetting != null) {
+                    byte[] bytes = rotatePdf(file, fileSetting);
+
+                    ByteArrayInputStream in = new ByteArrayInputStream(bytes);
+
+                    merger.addSource(in);
+                } else {
+                    merger.addSource(file.getInputStream());
+                }
             } else if (isJpg(file)) {
                 BufferedImage image = convertJpg(file);
                 byte[] bs = convertImage(image);
@@ -103,7 +124,72 @@ public class PdfMergingService {
         return null;
     }
 
-    private boolean isPdf(MultipartFile file) throws IOException {
+    public List<PdfThumnail> generatePdfThumbnails(PDDocument pdf, int dpi, String imageType) throws IOException {
+        List<PdfThumnail> thumbnails = new ArrayList<>();
+
+        int pageCount = pdf.getNumberOfPages();
+        PDFRenderer r = new PDFRenderer(pdf);
+
+        for (int i = 0; i < pageCount; i++) {
+            BufferedImage bim = r.renderImageWithDPI(i, dpi, ImageType.RGB);
+
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            OutputStream b64 = Base64.getEncoder().wrap(out);
+            ImageIOUtil.writeImage(bim, imageType, b64);
+
+            String encodedImg = out.toString("UTF-8");
+
+            PdfThumnail t = new PdfThumnail(pageCount, encodedImg, imageType);
+
+            thumbnails.add(t);
+        }
+
+        pdf.close();
+
+        return thumbnails;
+    }
+
+    private byte[] rotatePdf(MultipartFile file, PdfAdjustBean fileSetting) throws IOException {
+        PDDocument doc = PDDocument.load(file.getInputStream());
+        List<PdfPageAdjustBean> pages = fileSetting.getPages();
+
+        int pageCount = doc.getNumberOfPages();
+        for (int i = 0; i < pageCount; i++) {
+            PDPage page = doc.getPage(i);
+            PdfPageAdjustBean pageSettings = pages.get(i);
+
+            if (pageSettings != null && pageSettings.getRotate() != 0) {
+                int rotate = pageSettings.getRotate();
+                if (rotate < 0) {
+                    rotate = rotate + 360;
+                }
+
+                // Flip it
+                rotate = rotate - 360;
+                if (rotate < 0) {
+                    rotate = rotate * -1;
+                }
+
+                PDPageContentStream cs = new PDPageContentStream(doc, page, PDPageContentStream.AppendMode.PREPEND, false, false);
+                Matrix matrix = Matrix.getRotateInstance(Math.toRadians(rotate), 0, 0);
+                cs.transform(matrix);
+                cs.close();
+
+                PDRectangle cropBox = page.getCropBox();
+                Rectangle rectangle = cropBox.transform(matrix).getBounds();
+                PDRectangle newBox = new PDRectangle((float) rectangle.getX(), (float) rectangle.getY(), (float) rectangle.getWidth(), (float) rectangle.getHeight());
+                page.setCropBox(newBox);
+                page.setMediaBox(newBox);
+            }
+        }
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        doc.save(out);
+
+        return out.toByteArray();
+    }
+
+    public boolean isPdf(MultipartFile file) throws IOException {
         String contentType = file.getContentType();
         String originalFilename = file.getOriginalFilename();
         String ext = FilenameUtils.getExtension(originalFilename);
