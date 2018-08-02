@@ -39,6 +39,7 @@
 
                 var formData = new FormData();
                 formData.append('file', fileToUpload, fileToUpload.name);
+                formData.append('exportType', form.find('[name="exportType"]').val());
                 if (startPageSelector.is(':visible')) {
                     formData.append('startPage', startPageSelector.val());
                 }

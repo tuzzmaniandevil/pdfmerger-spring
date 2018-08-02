@@ -100,7 +100,7 @@
 
         // Fetch the previews
         var formData = new FormData();
-        formData.append('file', fileData.file, fileData.fileName);
+        formData.append('file', fileData.file, fileData.fileName);        
 
         var ajaxOpts = {
             type: 'POST',
@@ -299,6 +299,7 @@
                 var formData = new FormData();
 
                 formData.append('outputName', $('#outputName').val());
+                formData.append('compress', form.find('[name="compress"]').val());
                 formData.append('settings', new Blob([JSON.stringify(settings)], {
                     type: "application/json"
                 }));

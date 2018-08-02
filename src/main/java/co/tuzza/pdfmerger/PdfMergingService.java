@@ -9,30 +9,39 @@ import java.awt.Rectangle;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
 import org.apache.pdfbox.multipdf.Splitter;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.graphics.PDXObject;
+import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.JPEGFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
-import org.apache.pdfbox.tools.imageio.ImageIOUtil;
 import org.apache.pdfbox.util.Matrix;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -80,7 +89,26 @@ public class PdfMergingService {
         return baos;
     }
 
-    public ByteArrayOutputStream splitPdf(MultipartFile file, Integer startPage, Integer endPage) throws IOException {
+    public ByteArrayOutputStream compressPdf(byte[] pdfBytes) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PDDocument doc = PDDocument.load(pdfBytes);
+
+        if (doc != null) {
+            for (PDPage page : doc.getPages()) {
+                scanResources(page.getResources(), doc);
+            }
+            doc.save(baos);
+
+            try {
+                doc.close();
+            } catch (Throwable t) {
+            }
+        }
+
+        return baos;
+    }
+
+    public ByteArrayOutputStream splitPdf(MultipartFile file, Integer startPage, Integer endPage, PdfController.ExportType exportType) throws IOException {
         if (isPdf(file)) {
             Splitter splitter = new Splitter();
 
@@ -97,25 +125,80 @@ public class PdfMergingService {
             }
 
             List<PDDocument> splitDocs = splitter.split(pdd);
-
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
 
-            try (ZipOutputStream zos = new ZipOutputStream(baos)) {
+            switch (exportType) {
+                case SinglePDF: {
+                    PDFMergerUtility merger = new PDFMergerUtility();
+                    merger.setDestinationStream(baos);
 
-                for (int i = 0; i < splitDocs.size(); i++) {
-                    PDDocument splitDoc = splitDocs.get(i);
+                    for (int i = 0; i < splitDocs.size(); i++) {
+                        PDDocument splitDoc = splitDocs.get(i);
 
-                    ZipEntry zipEntry = new ZipEntry("page-" + i + ".pdf");
-                    zos.putNextEntry(zipEntry);
+                        ByteArrayOutputStream output = new ByteArrayOutputStream();
+                        splitDoc.save(output);
 
-                    ByteArrayOutputStream output = new ByteArrayOutputStream();
-                    splitDoc.save(output);
-                    zos.write(output.toByteArray());
-                    zos.closeEntry();
+                        merger.addSource(new ByteArrayInputStream(output.toByteArray()));
+                    }
+
+                    merger.mergeDocuments(MemoryUsageSetting.setupTempFileOnly());
+
+                    break;
                 }
+                case SeperateJPEG: {
+                    try (ZipOutputStream zos = new ZipOutputStream(baos)) {
 
-                zos.flush();
-                zos.close();
+                        for (int i = 0; i < splitDocs.size(); i++) {
+                            int pageNum = i + 1;
+                            PDDocument splitDoc = splitDocs.get(i);
+
+                            List<PdfThumnail> jpgs = generatePdfThumbnails(splitDoc, 300, "jpg");
+
+                            if (jpgs != null && jpgs.size() > 0) {
+                                ZipEntry zipEntry = new ZipEntry("page-" + pageNum + ".jpg");
+                                zos.putNextEntry(zipEntry);
+
+                                PdfThumnail jpg = jpgs.iterator().next();
+
+                                zos.write(jpg.imageBytes());
+                                zos.closeEntry();
+                            }
+
+                            try {
+                                splitDoc.close();
+                            } catch (Exception ex) {
+                            }
+                        }
+
+                        zos.flush();
+                        zos.close();
+                    }
+
+                    break;
+                }
+                case SeperatePDF:
+                default: {
+                    try (ZipOutputStream zos = new ZipOutputStream(baos)) {
+
+                        for (int i = 0; i < splitDocs.size(); i++) {
+                            int pageNum = i + 1;
+                            PDDocument splitDoc = splitDocs.get(i);
+
+                            ZipEntry zipEntry = new ZipEntry("page-" + pageNum + ".pdf");
+                            zos.putNextEntry(zipEntry);
+
+                            ByteArrayOutputStream output = new ByteArrayOutputStream();
+                            splitDoc.save(output);
+                            zos.write(output.toByteArray());
+                            zos.closeEntry();
+                        }
+
+                        zos.flush();
+                        zos.close();
+                    }
+
+                    break;
+                }
             }
 
             return baos;
@@ -133,10 +216,21 @@ public class PdfMergingService {
         for (int i = 0; i < pageCount; i++) {
             BufferedImage bim = r.renderImageWithDPI(i, dpi, ImageType.RGB);
 
+            final Iterator<ImageWriter> jpgWriters
+                    = ImageIO.getImageWritersByFormatName("jpeg");
+            final ImageWriter jpgWriter = jpgWriters.next();
+            final ImageWriteParam iwp = jpgWriter.getDefaultWriteParam();
+
+            iwp.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            iwp.setCompressionQuality(0.3f);
+
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
             OutputStream b64 = Base64.getEncoder().wrap(out);
-            ImageIOUtil.writeImage(bim, imageType, b64);
 
+            jpgWriter.setOutput(ImageIO.createImageOutputStream(b64));
+            jpgWriter.write(null, new IIOImage(bim, null, null), iwp);
+
+            //ImageIOUtil.writeImage(bim, imageType, b64);
             String encodedImg = out.toString("UTF-8");
 
             PdfThumnail t = new PdfThumnail(pageCount, encodedImg, imageType);
@@ -147,6 +241,39 @@ public class PdfMergingService {
         pdf.close();
 
         return thumbnails;
+    }
+
+    private void scanResources(final PDResources rList, final PDDocument doc)
+            throws FileNotFoundException, IOException {
+
+        for (COSName xObjectName : rList.getXObjectNames()) {
+            final PDXObject xObj = rList.getXObject(xObjectName);
+
+            if (xObj instanceof PDFormXObject) {
+                scanResources(((PDFormXObject) xObj).getResources(), doc);
+            }
+            if (!(xObj instanceof PDImageXObject)) {
+                continue;
+            }
+            PDImageXObject img = (PDImageXObject) xObj;
+
+            final Iterator<ImageWriter> jpgWriters
+                    = ImageIO.getImageWritersByFormatName("jpeg");
+            final ImageWriter jpgWriter = jpgWriters.next();
+            final ImageWriteParam iwp = jpgWriter.getDefaultWriteParam();
+            iwp.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            iwp.setCompressionQuality(0.40f);
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            jpgWriter.setOutput(ImageIO.createImageOutputStream(baos));
+            jpgWriter.write(null, new IIOImage(img.getImage(), null, null), iwp);
+
+            ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
+
+            PDImageXObject jpg = JPEGFactory.createFromStream(doc, bais);
+
+            rList.put(xObjectName, jpg);
+        }
     }
 
     private byte[] rotatePdf(MultipartFile file, PdfAdjustBean fileSetting) throws IOException {
