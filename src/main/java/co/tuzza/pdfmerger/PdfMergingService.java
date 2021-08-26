@@ -312,6 +312,7 @@ public class PdfMergingService {
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         doc.save(out);
+        doc.close();
 
         return out.toByteArray();
     }
